@@ -1,0 +1,145 @@
+# install Prometheus server
+-----------------------------
+sudo useradd --no-create-home --shell /bin/false Prometheus
+cd /tmp
+wget https://github.com/prometheus/prometheus/releases/download/v2.51.0/prometheus-2.51.0.linux-amd64.tar.gz
+tar xvf prometheus-2.51.0.linux-amd64.tar.gz
+cd prometheus-2.51.0.linux-amd64
+sudo cp prometheus /usr/local/bin/
+sudo cp promtool /usr/local/bin/
+sudo chown prometheus:prometheus /usr/local/bin/prometheus
+sudo chown prometheus:prometheus /usr/local/bin/promtool
+
+sudo mkdir /etc/prometheus
+sudo mkdir /var/lib/prometheus
+sudo cp -r consoles /etc/prometheus
+sudo cp -r console_libraries /etc/prometheus
+sudo chown -R prometheus:prometheus /etc/prometheus
+sudo chown prometheus:prometheus /var/lib/Prometheus
+sudo nano /etc/prometheus/prometheus.yml
+
+--> global:
+  scrape_interval: 15s
+
+scrape_configs:
+
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'ec2-node'
+    static_configs:
+      - targets: ['<EC2_PUBLIC_IP>:9100']
+
+  - job_name: 'python-flask-app'
+    static_configs:
+      - targets: ['<PYTHON_VM_IP>:5000']
+
+sudo nano /etc/systemd/system/prometheus.service
+
+--> [Unit]
+Description=Prometheus
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=prometheus
+Group=prometheus
+Type=simple
+ExecStart=/usr/local/bin/prometheus \
+    --config.file /etc/prometheus/prometheus.yml \
+    --storage.tsdb.path /var/lib/prometheus/ \
+    --web.console.templates=/etc/prometheus/consoles \
+    --web.console.libraries=/etc/prometheus/console_libraries
+[Install]
+WantedBy=multi-user.target
+
+
+sudo systemctl daemon-reload
+sudo systemctl start prometheus
+sudo systemctl enable prometheus
+sudo systemctl status prometheus
+
+# EC2 Node Exporter
+--------------------
+* make sure Inbound Rule: Custom TCP      9100        IP الـ Prometheus VM أو 0.0.0.0/0 للتجربة 
+
+cd /tmp
+wget https://github.com/prometheus/node_exporter/releases/download/v1.7.0/node_exporter-1.7.0.linux-amd64.tar.gz
+tar xvf node_exporter-1.7.0.linux-amd64.tar.gz
+sudo cp node_exporter-1.7.0.linux-amd64/node_exporter /usr/local/bin/
+
+# إنشاء user
+sudo useradd --no-create-home --shell /bin/false node_exporter
+sudo chown node_exporter:node_exporter /usr/local/bin/node_exporter
+
+# إنشاء الـ service
+sudo nano /etc/systemd/system/node_exporter.service
+
+--> [Unit]
+Description=Node Exporter
+After=network.target
+
+[Service]
+User=node_exporter
+Group=node_exporter
+Type=simple
+ExecStart=/usr/local/bin/node_exporter
+
+[Install]
+WantedBy=multi-user.target
+
+sudo systemctl daemon-reload
+sudo systemctl start node_exporter
+sudo systemctl enable node_exporter
+sudo systemctl status node_exporter
+
+
+# Python FlaskAPP on EC2
+------------------------- 
+* make sure Inbound Rule: Custom TCP      5000       IP الـ Prometheus VM أو 0.0.0.0/0 للتجربة 
+
+sudo apt install python3 python3-pip -y
+pip install flask prometheus-client
+nano app.py
+
+--> from flask import Flask, Response
+from prometheus_client import Counter, generate_latest, CONTENT_TYPE_LATEST
+
+app = Flask(__name__)
+
+requests_total = Counter(
+    'app_requests_total',
+    'Total requests'
+)
+
+@app.route('/')
+def home():
+    requests_total.inc()
+    return "Hello ITI to python app with prometheus monitoring"
+
+@app.route('/metrics')
+def metrics():
+    return Response(
+        generate_latest(),
+        mimetype=CONTENT_TYPE_LATEST
+    )
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
+
+
+
+# تشغيل الـ app
+python3 app.py
+
+
+# Check
+---------
+التحقق النهائي على Prometheus UI
+
+افتح http://<PROMETHEUS_VM_IP>:9090
+روح Status > Targets
+المفروض تشوف 3 targets كلهم UP:
+
+# Note: we enta bt3dl el ips fe file el Prometheus.yaml 3dlo fe el file ely fe path --> /etc/Prometheus/Prometheus.yaml
